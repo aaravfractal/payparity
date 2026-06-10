@@ -7,6 +7,7 @@ import { WrongNetworkDropdown } from "./WrongNetworkDropdown";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { Address } from "viem";
 import { useTargetNetwork } from "~~/hooks/helper/useTargetNetwork";
+import { trackEvent } from "~~/utils/analytics";
 import { getBlockExplorerAddressLink } from "~~/utils/helper";
 
 /**
@@ -30,7 +31,10 @@ export const RainbowKitCustomConnectButton = () => {
                 return (
                   <button
                     className="btn btn-primary btn-md rounded-lg px-6 font-semibold border-none shadow-none hover:bg-[#2BD19E] transition-all duration-200"
-                    onClick={openConnectModal}
+                    onClick={() => {
+                      trackEvent("connect_clicked");
+                      openConnectModal();
+                    }}
                     type="button"
                   >
                     Connect Wallet
