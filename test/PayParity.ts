@@ -1,4 +1,4 @@
-﻿import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
+import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { ethers, fhevm } from "hardhat";
 import { PayParity, PayParity__factory } from "../types";
 import { expect } from "chai";
@@ -24,6 +24,17 @@ describe("PayParity", function () {
   let payParityContract: PayParity;
   let payParityContractAddress: string;
 
+  async function submit(signer: HardhatEthersSigner, value: number) {
+    const enc = await fhevm
+      .createEncryptedInput(payParityContractAddress, signer.address)
+      .add32(value)
+      .encrypt();
+    const tx = await payParityContract
+      .connect(signer)
+      .submitSalary(CATEGORY_ID, enc.handles[0], enc.inputProof);
+    await tx.wait();
+  }
+
   before(async function () {
     const ethSigners: HardhatEthersSigner[] = await ethers.getSigners();
     signers = { deployer: ethSigners[0], alice: ethSigners[1], bob: ethSigners[2] };
@@ -38,112 +49,66 @@ describe("PayParity", function () {
   });
 
   it("category count should be zero after deployment", async function () {
-    const count = await payParityContract.getCategoryCount(CATEGORY_ID);
-    expect(count).to.eq(0);
+    expect(await payParityContract.getCategoryCount(CATEGORY_ID)).to.eq(0);
   });
 
   it("total submissions should be zero after deployment", async function () {
-    const total = await payParityContract.totalSubmissions();
-    expect(total).to.eq(0);
+    expect(await payParityContract.totalSubmissions()).to.eq(0);
   });
 
   it("reveal should not be ready before threshold", async function () {
-    const ready = await payParityContract.isRevealReady(CATEGORY_ID);
-    expect(ready).to.eq(false);
+    expect(await payParityContract.isRevealReady(CATEGORY_ID)).to.eq(false);
   });
 
   it("should accept an encrypted salary submission and increase the category count", async function () {
-    const countBefore = await payParityContract.getCategoryCount(CATEGORY_ID);
-    expect(countBefore).to.eq(0);
-
-    const clearSalary = 10;
-    const encryptedSalary = await fhevm
-      .createEncryptedInput(payParityContractAddress, signers.alice.address)
-      .add32(clearSalary)
-      .encrypt();
-
-    const tx = await payParityContract
-      .connect(signers.alice)
-      .submitSalary(CATEGORY_ID, encryptedSalary.handles[0], encryptedSalary.inputProof);
-    await tx.wait();
-
-    const countAfter = await payParityContract.getCategoryCount(CATEGORY_ID);
-    expect(countAfter).to.eq(1);
+    expect(await payParityContract.getCategoryCount(CATEGORY_ID)).to.eq(0);
+    await submit(signers.alice, 10);
+    expect(await payParityContract.getCategoryCount(CATEGORY_ID)).to.eq(1);
   });
 
-  it("should correctly sum two encrypted salaries in the same category", async function () {
-    const aliceSalary = 10;
-    const encryptedAlice = await fhevm
-      .createEncryptedInput(payParityContractAddress, signers.alice.address)
-      .add32(aliceSalary)
-      .encrypt();
+  it("should keep categories separate", async function () {
+    const OTHER_CATEGORY = 21;
+    await submit(signers.alice, 10);
+    expect(await payParityContract.getCategoryCount(OTHER_CATEGORY)).to.eq(0);
+    expect(await payParityContract.getCategoryCount(CATEGORY_ID)).to.eq(1);
+  });
 
-    let tx = await payParityContract
-      .connect(signers.alice)
-      .submitSalary(CATEGORY_ID, encryptedAlice.handles[0], encryptedAlice.inputProof);
+  it("reveal should become ready after threshold submissions", async function () {
+    for (let i = 0; i < 5; i++) {
+      await submit(signers.alice, 10 + i);
+    }
+    expect(await payParityContract.getCategoryCount(CATEGORY_ID)).to.eq(5);
+    expect(await payParityContract.isRevealReady(CATEGORY_ID)).to.eq(true);
+  });
+
+  it("allowReveal should REVERT below the privacy threshold (the privacy guarantee)", async function () {
+    // Only 3 submissions, below the threshold of 5.
+    for (let i = 0; i < 3; i++) {
+      await submit(signers.alice, 100);
+    }
+    await expect(
+      payParityContract.connect(signers.alice).allowReveal(CATEGORY_ID),
+    ).to.be.revertedWith("PayParity: below privacy threshold");
+  });
+
+  it("should sum encrypted salaries and decrypt the aggregate ONLY after reveal is authorized at threshold", async function () {
+    const salaries = [10, 20, 30, 40, 50]; // sum = 150
+    for (const s of salaries) {
+      await submit(signers.alice, s);
+    }
+    expect(await payParityContract.getCategoryCount(CATEGORY_ID)).to.eq(5);
+
+    // Threshold met: allowReveal grants the caller decrypt access on the aggregate sum.
+    const tx = await payParityContract.connect(signers.alice).allowReveal(CATEGORY_ID);
     await tx.wait();
-
-    const bobSalary = 20;
-    const encryptedBob = await fhevm
-      .createEncryptedInput(payParityContractAddress, signers.bob.address)
-      .add32(bobSalary)
-      .encrypt();
-
-    tx = await payParityContract
-      .connect(signers.bob)
-      .submitSalary(CATEGORY_ID, encryptedBob.handles[0], encryptedBob.inputProof);
-    await tx.wait();
-
-    const count = await payParityContract.getCategoryCount(CATEGORY_ID);
-    expect(count).to.eq(2);
 
     const encryptedSum = await payParityContract.getEncryptedSum(CATEGORY_ID);
     const clearSum = await fhevm.userDecryptEuint(
       FhevmType.euint32,
       encryptedSum,
       payParityContractAddress,
-      signers.bob,
+      signers.alice,
     );
-
-    expect(clearSum).to.eq(aliceSalary + bobSalary);
-  });
-
-  it("should keep categories separate", async function () {
-    const OTHER_CATEGORY = 21;
-
-    const enc1 = await fhevm
-      .createEncryptedInput(payParityContractAddress, signers.alice.address)
-      .add32(10)
-      .encrypt();
-    let tx = await payParityContract
-      .connect(signers.alice)
-      .submitSalary(CATEGORY_ID, enc1.handles[0], enc1.inputProof);
-    await tx.wait();
-
-    const otherCount = await payParityContract.getCategoryCount(OTHER_CATEGORY);
-    expect(otherCount).to.eq(0);
-
-    const thisCount = await payParityContract.getCategoryCount(CATEGORY_ID);
-    expect(thisCount).to.eq(1);
-  });
-
-  it("reveal should become ready after threshold submissions", async function () {
-    for (let i = 0; i < 5; i++) {
-      const encrypted = await fhevm
-        .createEncryptedInput(payParityContractAddress, signers.alice.address)
-        .add32(10 + i)
-        .encrypt();
-
-      const tx = await payParityContract
-        .connect(signers.alice)
-        .submitSalary(CATEGORY_ID, encrypted.handles[0], encrypted.inputProof);
-      await tx.wait();
-    }
-
-    const count = await payParityContract.getCategoryCount(CATEGORY_ID);
-    expect(count).to.eq(5);
-
-    const ready = await payParityContract.isRevealReady(CATEGORY_ID);
-    expect(ready).to.eq(true);
+    expect(clearSum).to.eq(150);
   });
 });
