@@ -23,3 +23,10 @@ tmp
 coverage.json
 pnpm-lock.yaml
 yarn.lock
+
+# --- PayParity additions ---
+.env.local
+.env.*.local
+.next
+.vercel
+_backups

@@ -1,110 +1,63 @@
-# FHEVM Hardhat Template
+# PayParity
 
-A Hardhat-based template for developing Fully Homomorphic Encryption (FHE) enabled Solidity smart contracts using the
-FHEVM protocol by Zama.
+**Prove fair pay. Expose nothing.**
 
-## Quick Start
+PayParity is a confidential salary-benchmarking dApp built on Fully Homomorphic Encryption (FHE). Employees submit their salary fully encrypted; anyone can see role-based salary benchmarks without any individual salary ever being revealed.
 
-For detailed instructions see:
-[FHEVM Hardhat Quick Start Tutorial](https://docs.zama.ai/protocol/solidity-guides/getting-started/quick-start-tutorial)
+Built for the Zama Developer Program — Season 3 (Builder Track), on the theme of composable privacy: public aggregates over private individual data.
 
-### Prerequisites
+## Live
 
-- **Node.js**: Version 20 or higher
-- **npm or yarn/pnpm**: Package manager
+- **App:** https://payparity-gilt.vercel.app
+- **Contract (verified, Sepolia):** [`0xE48C7CcEB4dA68FA71ccEB94a7d8146Ba4a62523`](https://sepolia.etherscan.io/address/0xE48C7CcEB4dA68FA71ccEB94a7d8146Ba4a62523#code)
 
-### Installation
+## Why it matters
 
-1. **Install dependencies**
+As pay-transparency laws expand (e.g. the EU Pay Transparency Directive), companies must prove they pay fairly without leaking individual salaries — and employees cannot compare pay without exposing themselves. PayParity is the private rail for that: provable fairness, zero individual exposure.
 
-   ```bash
-   npm install
+## How it works (the FHE design)
+
+1. **Encrypted submission.** A salary is encrypted in the browser and sent on-chain as an `euint32`. The contract never sees the plaintext value.
+2. **Encrypted aggregation.** Each role+level category stores an encrypted running **sum** (`FHE.add`) plus a **public count**. FHE is kept to reliable addition only.
+3. **On-chain privacy threshold.** The average cannot be revealed until a category has at least **5** submissions — enforced in the contract, not the UI:
+   ```solidity
+   require(cat.count >= PRIVACY_THRESHOLD, "PayParity: below privacy threshold");
    ```
+   So no individual salary can ever be reverse-engineered.
+4. **Aggregate-only reveal.** Only the encrypted *sum* is ever decrypted (never an individual). The average is computed off-chain after reveal (`sum / count`).
 
-2. **Set up environment variables**
+`categoryId = roleId * 10 + levelId`, computed off-chain.
 
-   ```bash
-   npx hardhat vars set MNEMONIC
+## Tech stack
 
-   # Set your Infura API key for network access
-   npx hardhat vars set INFURA_API_KEY
+- **Contract:** Solidity `^0.8.24`, `@fhevm/solidity` (FHE, `euint32`), Hardhat
+- **Network:** Ethereum Sepolia
+- **Frontend:** Next.js 15, wagmi, viem, RainbowKit, `@zama-fhe/react-sdk`
+- **Deploy:** Vercel
 
-   # Optional: Set Etherscan API key for contract verification
-   npx hardhat vars set ETHERSCAN_API_KEY
-   ```
+## Local development
 
-3. **Compile and test**
+```bash
+# contract
+cd payparity
+npm install
+npx hardhat test
+npx hardhat deploy --network sepolia --tags PayParity
 
-   ```bash
-   npm run compile
-   npm run test
-   ```
-
-4. **Deploy to local network**
-
-   ```bash
-   # Start a local FHEVM-ready node
-   npx hardhat node
-   # Deploy to local network
-   npx hardhat deploy --network localhost
-   ```
-
-5. **Deploy to Sepolia Testnet**
-
-   ```bash
-   # Deploy to Sepolia
-   npx hardhat deploy --network sepolia
-   # Verify contract on Etherscan
-   npx hardhat verify --network sepolia <CONTRACT_ADDRESS>
-   ```
-
-6. **Test on Sepolia Testnet**
-
-   ```bash
-   # Once deployed, you can run a simple test on Sepolia.
-   npx hardhat test --network sepolia
-   ```
-
-## 📁 Project Structure
-
-```
-fhevm-hardhat-template/
-├── contracts/           # Smart contract source files
-│   └── FHECounter.sol   # Example FHE counter contract
-├── deploy/              # Deployment scripts
-├── tasks/               # Hardhat custom tasks
-├── test/                # Test files
-├── hardhat.config.ts    # Hardhat configuration
-└── package.json         # Dependencies and scripts
+# frontend
+cd payparity-frontend/packages/nextjs
+pnpm install
+pnpm dev
 ```
 
-## 📜 Available Scripts
+The frontend needs `NEXT_PUBLIC_ALCHEMY_API_KEY` in `.env.local` (and in the Vercel project for production).
 
-| Script             | Description              |
-| ------------------ | ------------------------ |
-| `npm run compile`  | Compile all contracts    |
-| `npm run test`     | Run all tests            |
-| `npm run coverage` | Generate coverage report |
-| `npm run lint`     | Run linting checks       |
-| `npm run clean`    | Clean build artifacts    |
+## Security
 
-## 📚 Documentation
+- The 5-submission privacy threshold is enforced on-chain via `require` — a sub-threshold reveal reverts.
+- Decryption permission is granted only through `allowReveal`, which itself checks the threshold; submitting a salary never grants per-user decrypt access.
+- Only aggregate sums are ever decryptable, never individual values.
 
-- [FHEVM Documentation](https://docs.zama.ai/fhevm)
-- [FHEVM Hardhat Setup Guide](https://docs.zama.ai/protocol/solidity-guides/getting-started/setup)
-- [FHEVM Testing Guide](https://docs.zama.ai/protocol/solidity-guides/development-guide/hardhat/write_test)
-- [FHEVM Hardhat Plugin](https://docs.zama.ai/protocol/solidity-guides/development-guide/hardhat)
+## License
 
-## 📄 License
-
-This project is licensed under the BSD-3-Clause-Clear License. See the [LICENSE](LICENSE) file for details.
-
-## 🆘 Support
-
-- **GitHub Issues**: [Report bugs or request features](https://github.com/zama-ai/fhevm/issues)
-- **Documentation**: [FHEVM Docs](https://docs.zama.ai)
-- **Community**: [Zama Discord](https://discord.gg/zama)
-
----
-
-**Built with ❤️ by the Zama team**
+MIT — see [LICENSE](./LICENSE).
